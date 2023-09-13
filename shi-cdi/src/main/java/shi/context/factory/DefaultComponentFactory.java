@@ -26,7 +26,7 @@ public class DefaultComponentFactory<T> implements ComponentFactory<T> {
 
     @Override
     public Future<T> create() {
-        return Future.<Constructor<?>>future(p -> {
+        return context.vertx().executeBlocking(() -> {
                     var constructors = allowedConstructors(bind.to());
                     if (constructors.isEmpty()) {
                         throw new EnvironmentException(Errors.FAILED_INSTANTIATION.arguments(bind.to().getName()));
@@ -34,8 +34,8 @@ public class DefaultComponentFactory<T> implements ComponentFactory<T> {
                     if (constructors.size() > 1 && log.isLoggable(Level.WARNING)) {
                         log.warning(String.format("More than one valid constructor founded for class %s", bind.to()));
                     }
-                    p.tryComplete(constructors.get(0));
-                })
+                    return constructors.get(0);
+                }, false)
                 .compose(this::instantiate)
                 .compose(context::inject)
                 .map(instance -> {

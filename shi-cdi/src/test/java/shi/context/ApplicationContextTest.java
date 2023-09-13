@@ -1,10 +1,13 @@
 package shi.context;
 
+import io.vertx.core.Future;
 import org.junit.Test;
 import shi.context.annotation.Inject;
 import shi.context.binding.Bind;
+import shi.context.factory.ComponentFactory;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 public class ApplicationContextTest {
 
@@ -14,7 +17,16 @@ public class ApplicationContextTest {
         context.registry(Bind.bind(B.class).to(B.class));
         context.registry(Bind.bind(A.class).to(A.class));
         context.registry(Bind.bind(A2.class).to(A2.class));
-        context.registry(Bind.bind(B2.class).to(B2.class));
+//        context.registry(Bind.bind(B2.class).to(B2_2.class));
+        context.registry(Bind.bind(B2.class).name("b2"), new ComponentFactory<B2>() {
+            @Override
+            public Future<B2> create() {
+                return context.vertx().executeBlocking(() -> {
+                    TimeUnit.SECONDS.sleep(15);
+                    return new B2_2();
+                }, false);
+            }
+        });
         var a = context.getComponent(A.class)
                 .toCompletionStage()
                 .toCompletableFuture()
@@ -53,6 +65,10 @@ public class ApplicationContextTest {
     }
 
     interface B2 {
+
+    }
+
+    static class B2_2 implements B2 {
 
     }
 }

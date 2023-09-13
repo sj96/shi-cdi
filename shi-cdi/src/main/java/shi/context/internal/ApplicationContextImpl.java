@@ -1,12 +1,17 @@
 package shi.context.internal;
 
+import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
-import shi.context.annotation.Inject;
+import io.vertx.core.Vertx;
+import io.vertx.core.impl.logging.Logger;
+import io.vertx.core.impl.logging.LoggerFactory;
 import shi.context.ApplicationContext;
+import shi.context.annotation.Inject;
 import shi.context.binding.Bind;
 import shi.context.binding.Key;
 import shi.context.exceptions.EnvironmentException;
 import shi.context.exceptions.errors.Errors;
+import shi.context.factory.ComponentFactory;
 import shi.context.factory.DefaultComponentFactory;
 import shi.context.injectors.InjectorAdapter;
 import shi.context.injectors.MembersInjectorImpl;
@@ -21,6 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 public class ApplicationContextImpl implements ApplicationContext {
+    private static final Logger log = LoggerFactory.getLogger(ApplicationContextImpl.class);
 
     private static final Map<Class<? extends InjectorAdapter>, InjectorAdapter> INJECTORS;
 
@@ -34,7 +40,12 @@ public class ApplicationContextImpl implements ApplicationContext {
     private final Map<Class<?>, Set<Key>> allKeysByType = new ConcurrentHashMap<>(64);
     private final Map<Key, Bind> binders = new ConcurrentHashMap<>(256);
     private final Map<Bind, Object> holders = new ConcurrentHashMap<>(16);
-    private final Set<Bind> lockers = new HashSet<>();
+    private final Set<Bind> lockers = Collections.synchronizedSet(new HashSet<>());
+    private final Vertx vertx;
+
+    public ApplicationContextImpl(Vertx vertx) {
+        this.vertx = vertx;
+    }
 
     @Override
     public ApplicationContext addInjector(InjectorAdapter injector) {
@@ -62,21 +73,35 @@ public class ApplicationContextImpl implements ApplicationContext {
     private <T> Future<T> doGetComponent(Bind<T> bind) {
         synchronized (holders) {
             if (holders.containsKey(bind)) {
-                return Future.succeededFuture((T) holders.get(bind));
+                return vertx.executeBlocking(() -> (T) holders.get(bind), false)
+                        .compose(holder -> {
+                            if (holder instanceof ComponentFactory) {
+                                log.warn(String.format("create component %s by factory", bind.from()));
+                                return ((ComponentFactory<T>) holder).create();
+                            }
+                            log.warn(String.format("reuse component %s", bind.to()));
+                            return Future.succeededFuture(holder);
+                        });
             }
             if (bind.singleton()) {
-                if (lockers.contains(bind)) {
-                    throw new EnvironmentException(Errors.CIRCULAR_INJECTION
-                            .arguments(bind.from(), bind.name())
-                    );
+                synchronized (lockers) {
+                    if (lockers.contains(bind)) {
+                        throw new EnvironmentException(Errors.CIRCULAR_INJECTION
+                                .arguments(bind.from(), bind.name())
+                        );
+                    }
+                    lockers.add(bind);
                 }
-                lockers.add(bind);
             }
             return doCreateComponent(bind).andThen(ar -> {
-                if (ar.succeeded() && bind.singleton()) {
-                    holders.put(bind, ar.result());
+                synchronized (holders) {
+                    if (ar.succeeded() && bind.singleton()) {
+                        holders.put(bind, ar.result());
+                    }
                 }
-                lockers.remove(bind);
+                synchronized (lockers) {
+                    lockers.remove(bind);
+                }
             });
         }
     }
@@ -119,30 +144,39 @@ public class ApplicationContextImpl implements ApplicationContext {
     }
 
     private <T> Future<T> doCreateComponent(Bind<T> bind) {
+        log.warn(String.format("create component %s", bind.to()));
         var factory = new DefaultComponentFactory<>(this, bind);
         return factory.create();
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public <T> Future<List<T>> getComponents(Class<T> type) {
         if (type == null) return Future.succeededFuture(Collections.emptyList());
-        var binds = allKeysByType.entrySet()
+//        var binds = allKeysByType.entrySet()
+//                .stream()
+//                .filter(e -> type.isAssignableFrom(e.getKey()))
+//                .flatMap(e -> e.getValue().stream())
+//                .map(binders::get)
+//                .collect(Collectors.toList());
+//        var future = Future.succeededFuture(new ArrayList<T>(binds.size()));
+//        for (var bind : binds) {
+//            future = future.compose(list -> doGetComponent(bind)
+//                    .map(holder -> {
+//                        list.add((T) holder);
+//                        return list;
+//                    })
+//            );
+//        }
+//        return future.map(list -> list);
+        var futures = new ArrayList<Future<T>>();
+        allKeysByType.entrySet()
                 .stream()
                 .filter(e -> type.isAssignableFrom(e.getKey()))
                 .flatMap(e -> e.getValue().stream())
                 .map(binders::get)
-                .collect(Collectors.toList());
-        var future = Future.succeededFuture(new ArrayList<T>(binds.size()));
-        for (var bind : binds) {
-            future = future.compose(list -> doGetComponent(bind)
-                    .map(holder -> {
-                        list.add((T) holder);
-                        return list;
-                    })
-            );
-        }
-        return future.map(list -> list);
+                .map(this::<T>doGetComponent)
+                .forEach(futures::add);
+        return Future.all(futures).map(CompositeFuture::list);
     }
 
     @Override
@@ -158,7 +192,7 @@ public class ApplicationContextImpl implements ApplicationContext {
         }
         if (bind.to() != null && (bind.to().isInterface()
                 || Modifier.isAbstract(bind.to().getModifiers())
-                || !bind.to().isAssignableFrom(bind.from()))) {
+                || (!bind.from().isAssignableFrom(bind.to())) && !ComponentFactory.class.isAssignableFrom(bind.to()))) {
             throw new EnvironmentException(Errors.INVALID_BINDING
                     .arguments(bind.from(), bind.name(), bind.to(), bind.to())
             );
@@ -194,6 +228,14 @@ public class ApplicationContextImpl implements ApplicationContext {
     }
 
     @Override
+    public <T> void registry(Bind<T> bind, ComponentFactory<T> instance) {
+        if (bind == null || instance == null) return;
+        bind.to(instance.getClass());
+        registry(bind);
+        holders.put(bind, instance);
+    }
+
+    @Override
     public ApplicationContext release() {
         allKeysByType.clear();
         binders.clear();
@@ -201,25 +243,40 @@ public class ApplicationContextImpl implements ApplicationContext {
         return this;
     }
 
-    public Future<Object[]> resolveParameters(Parameter[] parameters, boolean injectAllParameters) {
-        var size = parameters.length;
-        var future = Future.succeededFuture(new ArrayList<>(size));
-        for (var param : parameters) {
-            future = future.compose(resolveParameters -> {
-                if (injectAllParameters || param.isAnnotationPresent(Inject.class)) {
-                    return resolveParameter(param).map(resolveParameter -> {
-                        resolveParameters.add(resolveParameter);
-                        return resolveParameters;
-                    });
-                }
-                resolveParameters.add(null);
-                return Future.succeededFuture(resolveParameters);
-            });
-        }
-        return future.map(ArrayList::toArray);
+    @Override
+    public Vertx vertx() {
+        return vertx;
     }
 
-    public Future<?> resolveParameter(Parameter param) {
+    public Future<Object[]> resolveParameters(Parameter[] parameters, boolean injectAllParameters) {
+//        var size = parameters.length;
+//        var future = Future.succeededFuture(new ArrayList<>(size));
+//        for (var param : parameters) {
+//            future = future.compose(resolveParameters -> {
+//                if (injectAllParameters || param.isAnnotationPresent(Inject.class)) {
+//                    return resolveParameter(param).map(resolveParameter -> {
+//                        resolveParameters.add(resolveParameter);
+//                        return resolveParameters;
+//                    });
+//                }
+//                resolveParameters.add(null);
+//                return Future.succeededFuture(resolveParameters);
+//            });
+//        }
+//        return future.map(ArrayList::toArray);
+
+        var futures = Arrays.stream(parameters)
+                .map(param -> {
+                    if (injectAllParameters || param.isAnnotationPresent(Inject.class)) {
+                        return resolveParameter(param);
+                    }
+                    return Future.succeededFuture();
+                })
+                .collect(Collectors.toList());
+        return Future.all(futures).map(composite -> composite.list().toArray());
+    }
+
+    private Future<?> resolveParameter(Parameter param) {
         var type = param.getType();
         var name = ReflectionUtils.getQualifier(param);
         if (Collection.class.isAssignableFrom(type)) {

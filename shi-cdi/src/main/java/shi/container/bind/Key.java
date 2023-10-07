@@ -1,4 +1,4 @@
-package shi.container.binding;
+package shi.container.bind;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

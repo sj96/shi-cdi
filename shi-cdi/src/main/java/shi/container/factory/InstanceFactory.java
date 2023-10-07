@@ -2,6 +2,6 @@ package shi.container.factory;
 
 import io.vertx.core.Future;
 
-public interface ComponentFactory<T> {
+public interface InstanceFactory<T> {
     Future<T> create();
 }

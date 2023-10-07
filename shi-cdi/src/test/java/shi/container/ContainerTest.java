@@ -3,8 +3,8 @@ package shi.container;
 import io.vertx.core.Future;
 import org.junit.Test;
 import shi.container.annotation.Inject;
-import shi.container.binding.Bind;
-import shi.container.factory.ComponentFactory;
+import shi.container.bind.Bind;
+import shi.container.factory.InstanceFactory;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -18,16 +18,17 @@ public class ContainerTest {
         context.registry(Bind.bind(A.class).to(A.class));
         context.registry(Bind.bind(A2.class).to(A2.class));
 //        context.registry(Bind.bind(B2.class).to(B2_2.class));
-        context.registry(Bind.bind(B2.class).name("b2"), new ComponentFactory<B2>() {
+        var factory = new InstanceFactory<B2>() {
             @Override
             public Future<B2> create() {
                 return context.vertx().executeBlocking(() -> {
-                    TimeUnit.SECONDS.sleep(15);
+                    TimeUnit.SECONDS.sleep(15); // NOSONAR
                     return new B2_2();
                 }, false);
             }
-        });
-        var a = context.getComponent(A.class)
+        };
+        context.registry(Bind.bind(B2.class).name("b2"), factory);
+        var a = context.getInstance(A.class)
                 .toCompletionStage()
                 .toCompletableFuture()
                 .join();

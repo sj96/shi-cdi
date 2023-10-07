@@ -11,7 +11,7 @@ import java.io.Serializable;
 @AllArgsConstructor
 @RequiredArgsConstructor
 @Accessors(fluent = true)
-public class ErrorType {
+public class ErrorType implements Serializable {
 
     @Getter
     private final int code;
@@ -19,7 +19,7 @@ public class ErrorType {
     @Getter
     @Setter
     private Throwable throwable;
-    private Object[] arguments;
+    private transient Object[] arguments;
 
     public static ErrorType create(int code, String message) {
 

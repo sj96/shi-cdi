@@ -9,12 +9,12 @@ import io.vertx.core.spi.VerticleFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import shi.container.Container;
-import shi.container.binding.Bind;
+import shi.container.bind.Bind;
 
 import java.util.concurrent.Callable;
 
 @RequiredArgsConstructor
-public class InjectVerticleFactory implements VerticleFactory {
+public class VerticleInjectionFactory implements VerticleFactory {
     private final Container container;
 
     @Override
@@ -30,6 +30,7 @@ public class InjectVerticleFactory implements VerticleFactory {
     }
 
     @SneakyThrows
+    @SuppressWarnings("unchecked")
     private Class<Verticle> getVerticleClass(String verticleName, ClassLoader classLoader) {
         verticleName = VerticleFactory.removePrefix(verticleName);
         Class<Verticle> clazz;
@@ -69,7 +70,7 @@ public class InjectVerticleFactory implements VerticleFactory {
 
         @Override
         public void start(Promise<Void> startPromise) {
-            container.getComponent(domain).onComplete(ar -> {
+            container.getInstance(domain).onComplete(ar -> {
                 if (ar.succeeded()) {
                     this.verticle = ar.result();
                     verticle.init(vertx, context);

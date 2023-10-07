@@ -7,15 +7,15 @@ import io.vertx.core.impl.logging.Logger;
 import io.vertx.core.impl.logging.LoggerFactory;
 import shi.container.Container;
 import shi.container.annotation.Inject;
-import shi.container.binding.Bind;
-import shi.container.binding.Key;
+import shi.container.bind.Bind;
+import shi.container.bind.Key;
 import shi.container.exceptions.EnvironmentException;
 import shi.container.exceptions.errors.Errors;
-import shi.container.factory.ComponentFactory;
-import shi.container.factory.DefaultComponentFactory;
-import shi.container.factory.InjectVerticleFactory;
-import shi.container.injectors.InjectorAdapter;
-import shi.container.injectors.MembersInjectorImpl;
+import shi.container.factory.InstanceFactory;
+import shi.container.factory.DefaultInstanceFactory;
+import shi.container.factory.VerticleInjectionFactory;
+import shi.container.injectors.FieldInjector;
+import shi.container.injectors.impl.MembersInjectorImpl;
 import shi.container.lifecircle.DisposableComponent;
 import shi.container.utils.BinderUtils;
 import shi.container.utils.ReflectionUtils;
@@ -32,12 +32,12 @@ import java.util.stream.Collectors;
 public class ContainerImpl implements Container {
     private static final Logger log = LoggerFactory.getLogger(ContainerImpl.class);
 
-    private static final Map<Class<? extends InjectorAdapter>, InjectorAdapter> INJECTORS;
+    private static final Map<Class<? extends FieldInjector>, FieldInjector> FIELD_INJECTORS;
 
     static {
-        INJECTORS = new HashMap<>();
-        for (var injector : ServiceLoader.load(InjectorAdapter.class)) {
-            INJECTORS.put(injector.getClass(), injector);
+        FIELD_INJECTORS = new HashMap<>();
+        for (var injector : ServiceLoader.load(FieldInjector.class)) {
+            FIELD_INJECTORS.put(injector.getClass(), injector);
         }
     }
 
@@ -49,28 +49,28 @@ public class ContainerImpl implements Container {
 
     public ContainerImpl(Vertx vertx) {
         this.vertx = vertx;
-        vertx.registerVerticleFactory(new InjectVerticleFactory(this));
+        vertx.registerVerticleFactory(new VerticleInjectionFactory(this));
     }
 
     @Override
-    public Container addInjector(InjectorAdapter injector) {
-        INJECTORS.put(injector.getClass(), injector);
+    public Container addInjector(FieldInjector injector) {
+        FIELD_INJECTORS.put(injector.getClass(), injector);
         return this;
     }
 
     @Override
-    public <T> Future<T> createComponent(Class<T> type) {
+    public <T> Future<T> createInstance(Class<T> type) {
         return doCreateComponent(Bind.bind(type).to(type));
     }
 
     @Override
-    public <T> Future<T> getComponent(Class<T> type) {
+    public <T> Future<T> getInstance(Class<T> type) {
         var bind = this.findBind(type, "");
         return doGetComponent(bind);
     }
 
     @Override
-    public <T> Future<T> getComponent(Class<T> type, String qualifier) {
+    public <T> Future<T> getInstance(Class<T> type, String qualifier) {
         var bind = this.findBind(type, qualifier);
         return doGetComponent(bind);
     }
@@ -79,9 +79,9 @@ public class ContainerImpl implements Container {
         synchronized (holders) {
             if (holders.containsKey(bind)) {
                 return vertx.executeBlocking(() -> (T) holders.get(bind), false).compose(holder -> {
-                    if (holder instanceof ComponentFactory) {
+                    if (holder instanceof InstanceFactory) {
                         log.warn(String.format("Create component '%s' by factory '%s", bind.from(), holder.getClass()));
-                        return ((ComponentFactory<T>) holder).create();
+                        return ((InstanceFactory<T>) holder).create();
                     }
                     log.warn(String.format("reuse component %s", bind.to()));
                     return Future.succeededFuture(holder);
@@ -148,12 +148,12 @@ public class ContainerImpl implements Container {
 
     private <T> Future<T> doCreateComponent(Bind<T> bind) {
         log.warn(String.format("create component %s", bind.to()));
-        var factory = new DefaultComponentFactory<>(this, bind);
+        var factory = new DefaultInstanceFactory<>(this, bind);
         return factory.create();
     }
 
     @Override
-    public <T> Future<List<T>> getComponents(Class<T> type) {
+    public <T> Future<List<T>> getInstances(Class<T> type) {
         if (type == null) return Future.succeededFuture(Collections.emptyList());
         var futures = new ArrayList<Future<T>>();
         allKeysByType.entrySet().stream()
@@ -167,7 +167,7 @@ public class ContainerImpl implements Container {
 
     @Override
     public <T> Future<T> inject(T instance) {
-        var membersInject = new MembersInjectorImpl(this, INJECTORS);
+        var membersInject = new MembersInjectorImpl(this, FIELD_INJECTORS);
         return membersInject.inject(instance).map(instance);
     }
 
@@ -178,7 +178,7 @@ public class ContainerImpl implements Container {
         }
         if (bind.to() != null && (bind.to().isInterface()
                 || Modifier.isAbstract(bind.to().getModifiers())
-                || (!bind.from().isAssignableFrom(bind.to())) && !ComponentFactory.class.isAssignableFrom(bind.to()))) {
+                || (!bind.from().isAssignableFrom(bind.to())) && !InstanceFactory.class.isAssignableFrom(bind.to()))) {
             throw new EnvironmentException(Errors.INVALID_BINDING
                     .arguments(bind.from(), bind.name(), bind.to(), bind.to())
             );
@@ -214,7 +214,7 @@ public class ContainerImpl implements Container {
     }
 
     @Override
-    public <T> void registry(Bind<T> bind, ComponentFactory<T> instance) {
+    public <T> void registry(Bind<T> bind, InstanceFactory<T> instance) {
         if (bind == null || instance == null) return;
         bind.to(instance.getClass());
         registry(bind);
@@ -270,14 +270,14 @@ public class ContainerImpl implements Container {
         if (Collection.class.isAssignableFrom(type)) {
             var parameterizedType = (ParameterizedType) param.getParameterizedType();
             var elementType = (Class<?>) parameterizedType.getActualTypeArguments()[0];
-            return getComponents(elementType).map(paramValue -> {
+            return getInstances(elementType).map(paramValue -> {
                 if (Set.class.isAssignableFrom(type)) {
                     return Set.copyOf((Collection<?>) paramValue);
                 }
                 return paramValue;
             });
         } else {
-            return getComponent(type, name);
+            return getInstance(type, name);
         }
     }
 }

@@ -1,8 +1,10 @@
-package shi.container.injectors;
+package shi.container.injectors.impl;
 
 import io.vertx.core.Future;
 import lombok.RequiredArgsConstructor;
 import shi.container.annotation.Inject;
+import shi.container.injectors.FieldInjector;
+import shi.container.injectors.MembersInjector;
 import shi.container.internal.ContainerImpl;
 import shi.container.utils.AnnotationUtils;
 import shi.container.utils.ReflectionUtils;
@@ -15,7 +17,7 @@ import java.util.Map;
 public final class MembersInjectorImpl implements MembersInjector {
 
     private final ContainerImpl context;
-    private final Map<Class<? extends InjectorAdapter>, InjectorAdapter> injectors;
+    private final Map<Class<? extends FieldInjector>, FieldInjector> injectors;
 
     @Override
     public Future<Void> inject(Object instance) {
@@ -63,7 +65,7 @@ public final class MembersInjectorImpl implements MembersInjector {
                 }
                 var fieldType = field.getType();
                 var name = ReflectionUtils.getQualifier(field);
-                return context.getComponent(fieldType, name).map(component -> {
+                return context.getInstance(fieldType, name).map(component -> {
                     ReflectionUtils.setField(field, instance, component);
                     return null;
                 });

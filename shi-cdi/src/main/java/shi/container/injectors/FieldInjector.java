@@ -4,7 +4,7 @@ import io.vertx.core.Future;
 
 import java.lang.reflect.Field;
 
-public interface InjectorAdapter {
+public interface FieldInjector {
 
     boolean isInjectable(Field field);
 

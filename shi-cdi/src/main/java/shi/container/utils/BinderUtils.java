@@ -3,7 +3,7 @@ package shi.container.utils;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import shi.container.annotation.Primary;
-import shi.container.binding.Bind;
+import shi.container.bind.Bind;
 import shi.container.annotation.Singleton;
 
 import java.util.Arrays;

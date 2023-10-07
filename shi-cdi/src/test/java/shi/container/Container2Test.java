@@ -8,7 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import shi.container.binding.Bind;
+import shi.container.bind.Bind;
 
 import java.util.concurrent.TimeUnit;
 
@@ -41,7 +41,7 @@ public class Container2Test {
 
     static class Component1 {
         public Component1() throws InterruptedException {
-            TimeUnit.SECONDS.sleep(5);
+            TimeUnit.SECONDS.sleep(5); // NOSONAR
         }
     }
 }

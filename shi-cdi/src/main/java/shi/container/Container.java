@@ -2,10 +2,10 @@ package shi.container;
 
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
-import shi.container.factory.ComponentFactory;
-import shi.container.injectors.InjectorAdapter;
+import shi.container.factory.InstanceFactory;
+import shi.container.injectors.FieldInjector;
 import shi.container.internal.ContainerImpl;
-import shi.container.binding.Bind;
+import shi.container.bind.Bind;
 
 import java.util.List;
 
@@ -20,15 +20,15 @@ public interface Container {
 
     Vertx vertx();
 
-    Container addInjector(InjectorAdapter injector);
+    Container addInjector(FieldInjector injector);
 
-    <T> Future<T> createComponent(Class<T> type);
+    <T> Future<T> createInstance(Class<T> type);
 
-    <T> Future<T> getComponent(Class<T> type);
+    <T> Future<T> getInstance(Class<T> type);
 
-    <T> Future<T> getComponent(Class<T> type, String qualifier);
+    <T> Future<T> getInstance(Class<T> type, String qualifier);
 
-    <T> Future<List<T>> getComponents(Class<T> type);
+    <T> Future<List<T>> getInstances(Class<T> type);
 
     <T> Future<T> inject(T instance);
 
@@ -36,7 +36,7 @@ public interface Container {
 
     <T> void registry(Bind<T> bind, T instance);
 
-    <T> void registry(Bind<T> bind, ComponentFactory<T> instance);
+    <T> void registry(Bind<T> bind, InstanceFactory<T> instance);
 
     Future<Void> close();
 }
